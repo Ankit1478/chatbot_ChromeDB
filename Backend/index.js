@@ -1,7 +1,11 @@
 require('dotenv').config();
 const { ChromaClient, OpenAIEmbeddingFunction } = require('chromadb');
 const OpenAI = require("openai");
-const readline = require("readline");
+const express = require('express');
+const app = express();
+const port = 3000;
+
+app.use(express.json()); 
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -10,21 +14,19 @@ const openai = new OpenAI({
 
 // Initialize Chroma client
 const chroma = new ChromaClient();
-const embedder = new OpenAIEmbeddingFunction({openai_api_key: process.env.OPENAI_API_KEY});
+const embedder = new OpenAIEmbeddingFunction({ openai_api_key: process.env.OPENAI_API_KEY });
 
 let collection;
 
 // Function to initialize the Chroma collection
 async function initializeChromaCollection() {
     try {
-        // Try to get the existing collection
         collection = await chroma.getCollection({
             name: "story_summaries",
             embeddingFunction: embedder
         });
         console.log("Existing Chroma collection retrieved successfully.");
     } catch (error) {
-        // If the collection doesn't exist, create a new one
         if (error.message.includes('Collection not found')) {
             try {
                 collection = await chroma.createCollection({
@@ -46,7 +48,7 @@ async function initializeChromaCollection() {
 // Function to summarize a story using OpenAI
 async function summarizeStory(story) {
     const completion = await openai.chat.completions.create({
-        model: "gpt-4",
+        model: "gpt-4o",
         messages: [
             { role: "system", content: "You are a helpful assistant that can summarize information concisely." },
             { role: "user", content: `Please summarize the following story: "${story}"` },
@@ -75,56 +77,47 @@ async function getResponseBasedOnSummaries(userQuery) {
 
     if (queryResult.documents[0].length === 0) {
         console.log("No relevant stories found. Please add more stories.\n");
-        return;
+        return "No relevant stories found.";
     }
 
     const relevantSummaries = queryResult.documents[0].join(" ");
 
     const completion = await openai.chat.completions.create({
-        model: "gpt-4",
+        model: "gpt-4o",
         messages: [
             { role: "system", content: "You are a helpful assistant with access to summarized memories." },
             { role: "user", content: `Here are some relevant summarized stories: "${relevantSummaries}"` },
             { role: "user", content: `Based on the above summaries, please answer this question: "${userQuery}"` },
         ],
     });
-    console.log("Response:", completion.choices[0].message.content, "\n");
+    return completion.choices[0].message.content;
 }
 
-// Terminal interface setup
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: "Enter a command ('add', 'ask', 'exit'): ",
+// Route to add a new story and summarize it
+app.post('/add', async (req, res) => {
+    const { story } = req.body;
+    try {
+        await addStory(story);
+        res.status(200).json({ message: 'Story added and summarized successfully!' });
+    } catch (error) {
+        console.error("Error adding story:", error);
+        res.status(500).json({ error: 'An error occurred while adding the story.' });
+    }
 });
 
-// Main function to run the program
-async function main() {
-    await initializeChromaCollection();
+// Route to ask a question based on summarized stories
+app.post('/ask', async (req, res) => {
+    const { query } = req.body;
+    try {
+        const response = await getResponseBasedOnSummaries(query);
+        res.status(200).json({ response });
+    } catch (error) {
+        console.error("Error processing query:", error);
+        res.status(500).json({ error: 'An error occurred while processing your query.' });
+    }
+});
 
-    rl.prompt();
-    rl.on("line", async (line) => {
-        const input = line.trim().toLowerCase();
-        if (input === "add") {
-            rl.question("Enter the story: ", async (story) => {
-                await addStory(story);
-                rl.prompt();
-            });
-        } else if (input === "ask") {
-            rl.question("Enter your question: ", async (question) => {
-                await getResponseBasedOnSummaries(question);
-                rl.prompt();
-            });
-        } else if (input === "exit") {
-            rl.close();
-        } else {
-            console.log("Invalid command. Please use 'add', 'ask', or 'exit'.\n");
-            rl.prompt();
-        }
-    }).on("close", () => {
-        console.log("Exiting the program.");
-        process.exit(0);
-    });
-}
-
-main().catch(console.error);
+// Initialize the Chroma collection before starting the server
+initializeChromaCollection().then(() => {
+    app.listen(port, () => console.log(`App listening on port ${port}!`));
+});
