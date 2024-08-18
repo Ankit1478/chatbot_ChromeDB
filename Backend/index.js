@@ -13,7 +13,10 @@ const openai = new OpenAI({
 });
 
 // Initialize Chroma client
-const chroma = new ChromaClient();
+const client = new ChromaClient({
+    path: 'http://54.210.124.255:8000'
+});
+
 const embedder = new OpenAIEmbeddingFunction({ openai_api_key: process.env.OPENAI_API_KEY });
 
 let collection;
@@ -21,27 +24,25 @@ let collection;
 // Function to initialize the Chroma collection
 async function initializeChromaCollection() {
     try {
-        collection = await chroma.getCollection({
-            name: "story_summaries",
-            embeddingFunction: embedder
-        });
-        console.log("Existing Chroma collection retrieved successfully.");
-    } catch (error) {
-        if (error.message.includes('Collection not found')) {
-            try {
-                collection = await chroma.createCollection({
-                    name: "story_summaries",
-                    embeddingFunction: embedder
-                });
-                console.log("New Chroma collection created successfully.");
-            } catch (createError) {
-                console.error("Error creating Chroma collection:", createError);
-                process.exit(1);
-            }
+        const collections = await client.listCollections();
+        const existingCollection = collections.find(c => c.name === "story_summaries");
+        
+        if (existingCollection) {
+            collection = await client.getCollection({
+                name: "story_summaries",
+                embeddingFunction: embedder
+            });
+            console.log("Existing Chroma collection retrieved successfully.");
         } else {
-            console.error("Error retrieving Chroma collection:", error);
-            process.exit(1);
+            collection = await client.createCollection({
+                name: "story_summaries",
+                embeddingFunction: embedder
+            });
+            console.log("New Chroma collection created successfully.");
         }
+    } catch (error) {
+        console.error("Error initializing Chroma collection:", error);
+        process.exit(1);
     }
 }
 
@@ -120,4 +121,7 @@ app.post('/ask', async (req, res) => {
 // Initialize the Chroma collection before starting the server
 initializeChromaCollection().then(() => {
     app.listen(port, () => console.log(`App listening on port ${port}!`));
+}).catch(error => {
+    console.error("Failed to initialize the application:", error);
+    process.exit(1);
 });
