@@ -2,10 +2,23 @@ require('dotenv').config();
 const { ChromaClient, OpenAIEmbeddingFunction } = require('chromadb');
 const OpenAI = require("openai");
 const express = require('express');
+const admin = require('firebase-admin');
 const app = express();
-const port = 3000;
+const port = 3001;
+const cors = require('cors')
+ 
+app.use(cors())
+app.use(express.json());
 
-app.use(express.json()); 
+// Initialize Firebase Admin SDK
+const serviceAccount = require('./serviceAccount.json');
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: 'https://memgpt-a5c04-default-rtdb.firebaseio.com/'
+});
+
+const db = admin.database();
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -14,7 +27,7 @@ const openai = new OpenAI({
 
 // Initialize Chroma client
 const client = new ChromaClient({
-    path: 'http://54.210.124.255:8000'
+    path: 'http://104.198.138.55:8000'
 });
 
 const embedder = new OpenAIEmbeddingFunction({ openai_api_key: process.env.OPENAI_API_KEY });
@@ -26,7 +39,7 @@ async function initializeChromaCollection() {
     try {
         const collections = await client.listCollections();
         const existingCollection = collections.find(c => c.name === "story_summaries");
-        
+
         if (existingCollection) {
             collection = await client.getCollection({
                 name: "story_summaries",
@@ -40,9 +53,33 @@ async function initializeChromaCollection() {
             });
             console.log("New Chroma collection created successfully.");
         }
+
+        // Rehydrate ChromaDB from Firebase if needed
+        await rehydrateChromaCollectionFromFirebase();
     } catch (error) {
         console.error("Error initializing Chroma collection:", error);
         process.exit(1);
+    }
+}
+
+// Function to rehydrate Chroma collection from Firebase
+async function rehydrateChromaCollectionFromFirebase() {
+    const storiesRef = db.ref('stories');
+    const snapshot = await storiesRef.once('value');
+    const stories = snapshot.val();
+
+    if (stories) {
+        for (let storyId in stories) {
+            const { original_story, summary } = stories[storyId];
+            await collection.add({
+                ids: [storyId],
+                documents: [summary],
+                metadatas: [{ original_story: original_story }]
+            });
+        }
+        console.log("ChromaDB rehydrated with data from Firebase.");
+    } else {
+        console.log("No data found in Firebase to rehydrate ChromaDB.");
     }
 }
 
@@ -61,11 +98,21 @@ async function summarizeStory(story) {
 // Function to add and summarize a new story
 async function addStory(story) {
     const summary = await summarizeStory(story);
+    const storyId = Date.now().toString();
+
+    // Store the summary in ChromaDB
     await collection.add({
-        ids: [Date.now().toString()],
+        ids: [storyId],
         documents: [summary],
         metadatas: [{ original_story: story }]
     });
+
+    // Store the summary and original story in Firebase Realtime Database
+    await db.ref('stories/' + storyId).set({
+        original_story: story,
+        summary: summary
+    });
+
     console.log("Story added and summarized successfully!\n");
 }
 

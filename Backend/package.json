@@ -15,6 +15,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "firebase-admin": "^12.3.1",
     "fs": "^0.0.1-security",
     "ml-distance": "^4.0.1",
     "natural": "^8.0.1",
