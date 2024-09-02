@@ -5,9 +5,9 @@ const express = require('express');
 const admin = require('firebase-admin');
 const app = express();
 const port = 3001;
-const cors = require('cors')
- 
-app.use(cors())
+const cors = require('cors');
+
+app.use(cors());
 app.use(express.json());
 
 // Initialize Firebase Admin SDK
@@ -15,24 +15,29 @@ const serviceAccount = require('./serviceAccount.json');
 
 admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
-    databaseURL: 'https://memgpt-a5c04-default-rtdb.firebaseio.com/'
+    databaseURL: 'https://foodmatto-default-rtdb.firebaseio.com/'
 });
 
 const db = admin.database();
+
+const client = new ChromaClient({
+    path: 'http://35.192.141.150:8000'
+});
+
+// Initialize Chroma client
+// const client = new ChromaClient();
+
 
 // Initialize OpenAI client
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Initialize Chroma client
-const client = new ChromaClient({
-    path: 'http://104.198.138.55:8000'
-});
 
 const embedder = new OpenAIEmbeddingFunction({ openai_api_key: process.env.OPENAI_API_KEY });
 
 let collection;
+let latestStoryId = null;
 
 // Function to initialize the Chroma collection
 async function initializeChromaCollection() {
@@ -113,32 +118,55 @@ async function addStory(story) {
         summary: summary
     });
 
+    // Update the latestStoryId to the current story
+    latestStoryId = storyId;
+
     console.log("Story added and summarized successfully!\n");
 }
 
-// Function to generate a response based on all summarized stories
-async function getResponseBasedOnSummaries(userQuery) {
-    const queryResult = await collection.query({
-        queryTexts: [userQuery],
-        nResults: 5
-    });
-
-    if (queryResult.documents[0].length === 0) {
-        console.log("No relevant stories found. Please add more stories.\n");
-        return "No relevant stories found.";
-    }
-
-    const relevantSummaries = queryResult.documents[0].join(" ");
-
+async function giveCharacterName(story) {
     const completion = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
-            { role: "system", content: "You are a helpful assistant with access to summarized memories." },
-            { role: "user", content: `Here are some relevant summarized stories: "${relevantSummaries}"` },
-            { role: "user", content: `Based on the above summaries, please answer this question: "${userQuery}"` },
+            { role: "system", content: "You are a helpful assistant. Please identify and return only the character names from the following story, separated by commas, with no additional text." },
+            { role: "user", content: `Extract and return only the character names from this story: "${story}"` },
         ],
     });
-    return completion.choices[0].message.content;
+    const characterNames = completion.choices[0].message.content.trim();
+    
+    // Ensure there are no additional text
+    return characterNames.split(',').map(name => name.trim()).join(', ');
+}
+
+// Function to generate a response based on the latest summarized story
+async function getResponseBasedOnLatestStory(userQuery, characterName) {
+    try {
+        // Fetch the latest summary directly using the latestStoryId
+        const snapshot = await db.ref('stories/' + latestStoryId).once('value');
+        const storyData = snapshot.val();
+
+        if (!storyData) {
+            console.log("No relevant story found. Please add a new story.");
+            return "No relevant story found.";
+        }
+
+        const relevantSummary = storyData.summary;
+
+        // Generate a response based on the relevant summary
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+                { role: "system", content: "You are a helpful assistant with access to summarized memories." },
+                { role: "user", content: `Here is a summarized story: "${relevantSummary}"` },
+                { role: "user", content: `As the character "${characterName}", please answer this question: "${userQuery}"` },
+            ],
+        });
+
+        return completion.choices[0].message.content;
+    } catch (error) {
+        console.error("Error generating response based on the latest story:", error);
+        return "An error occurred while processing your request.";
+    }
 }
 
 // Route to add a new story and summarize it
@@ -153,11 +181,22 @@ app.post('/add', async (req, res) => {
     }
 });
 
-// Route to ask a question based on summarized stories
-app.post('/ask', async (req, res) => {
-    const { query } = req.body;
+app.post("/charactername", async (req, res) => {
+    const { story } = req.body;
     try {
-        const response = await getResponseBasedOnSummaries(query);
+        const response = await giveCharacterName(story);
+        res.status(200).json({ response });
+    } catch (error) {
+        console.error("Error processing query:", error);
+        res.status(500).json({ error: 'An error occurred while processing your query.' });
+    }
+});
+
+// Route to ask a question based on the latest summarized story
+app.post('/ask', async (req, res) => {
+    const { query, characterName } = req.body;
+    try {
+        const response = await getResponseBasedOnLatestStory(query, characterName);
         res.status(200).json({ response });
     } catch (error) {
         console.error("Error processing query:", error);
