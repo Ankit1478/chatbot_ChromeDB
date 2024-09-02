@@ -10,22 +10,22 @@ const cors = require('cors');
 app.use(cors());
 app.use(express.json());
 
-// Initialize Firebase Admin SDK
-const serviceAccount = require('./serviceAccount.json');
-
+// Initialize Firebase Admin SDK using environment variables
 admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+    credential: admin.credential.cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    }),
     databaseURL: 'https://foodmatto-default-rtdb.firebaseio.com/'
 });
 
 const db = admin.database();
 
+// Initialize ChromaDB Client using environment variables
 const client = new ChromaClient({
-    path: 'http://35.192.141.150:8000'
+    path: process.env.CHROMA_CLIENT_PATH
 });
-
-// Initialize Chroma client
-// const client = new ChromaClient();
 
 
 // Initialize OpenAI client
@@ -203,6 +203,9 @@ app.post('/ask', async (req, res) => {
         res.status(500).json({ error: 'An error occurred while processing your query.' });
     }
 });
+app.get("/",(req, res)=>{
+    res.send("running")
+})
 
 // Initialize the Chroma collection before starting the server
 initializeChromaCollection().then(() => {
