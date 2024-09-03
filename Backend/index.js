@@ -209,7 +209,7 @@ app.get("/",(req, res)=>{
 
 // Initialize the Chroma collection before starting the server
 initializeChromaCollection().then(() => {
-    app.listen(port, () => console.log(`App listening on port ${port}!`));
+    app.listen(port,'0.0.0.0', () => console.log(`App listening on port ${port}!`));
 }).catch(error => {
     console.error("Failed to initialize the application:", error);
     process.exit(1);
