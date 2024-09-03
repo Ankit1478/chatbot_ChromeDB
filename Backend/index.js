@@ -4,7 +4,7 @@ const OpenAI = require("openai");
 const express = require('express');
 const admin = require('firebase-admin');
 const app = express();
-const port = 3001;
+const port = 10000;
 const cors = require('cors');
 
 app.use(cors());
@@ -209,7 +209,7 @@ app.get("/",(req, res)=>{
 
 // Initialize the Chroma collection before starting the server
 initializeChromaCollection().then(() => {
-    app.listen(port,'0.0.0.0', () => console.log(`App listening on port ${port}!`));
+    app.listen(port, () => console.log(`App listening on port ${port}!`));
 }).catch(error => {
     console.error("Failed to initialize the application:", error);
     process.exit(1);
